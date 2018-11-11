@@ -98,29 +98,23 @@ cv::Mat BarcodeFinder::extractBarcodeMat(cv::RotatedRect bounding_rect, cv::Mat 
 	cv::Point2f input_corners[4];
 	bounding_rect.points(input_corners);
 
-	//draw a circle at eacht point to indicate the corners (probably remove when odne with debug)
-	for (cv::Point2f center : input_corners) { circle(output, center, 5, cv::Scalar(0, 255, 255), 3); }
+	// rect is the RotatedRect (I got it from a contour...)
+	// matrices we'll use
+	cv::Mat M, rotated, cropped;
+	// get angle and size from the bounding box
+	float angle = bounding_rect.angle;
+	cv::Size rect_size = bounding_rect.size;
+	// thanks to http://felix.abecassis.me/2011/10/opencv-rotation-deskewing/
+	if (bounding_rect.angle < -45.) {
+		angle += 90.0;
+		cv::swap(rect_size.width, rect_size.height);
+	}
+	// get the rotation matrix
+	M = cv::getRotationMatrix2D(bounding_rect.center, angle, 1.0);
+	// perform the affine transformation
+	cv::warpAffine(unedited, rotated, M, unedited.size(), cv::INTER_CUBIC);
+	// crop the resulting image
+	cv::getRectSubPix(rotated, rect_size, bounding_rect.center, cropped);
 
-	//calculate the width and height by using the distance between points
-	float const height = distBetweenPoints(input_corners[0], input_corners[1]);
-	float const width = distBetweenPoints(input_corners[0], input_corners[3]);
-
-	//use to calculated width and height as dimensions for the
-	//new image and create the corner points
-	std::vector<cv::Point2f> dest_corners = {
-		cv::Point2f(0, 0), cv::Point2f(0, height), cv::Point2f(width, height), cv::Point2f(width, 0)
-	};
-
-	//calculate the transformation matrix required to acieve requested transformation
-	cv::Mat const mat = getPerspectiveTransform(input_corners, dest_corners.data());
-
-	//execute the transformation
-	cv::Mat warped;
-	warpPerspective(unedited, warped, mat, cv::Size(width, height));
-
-	//for reading the data it does not matter if image is upside down. 
-	//however if the image is in portrait orientation it needs to be rotated 90 degrees
-	if (warped.rows > warped.cols) { cv::rotate(warped, warped, cv::ROTATE_90_CLOCKWISE); }
-
-	return warped;
+	return rotated(cv::Rect(input_corners[1], input_corners[3]));
 }
