@@ -40,19 +40,24 @@ void BarcodeFinder::ScanBarcode(cv::Mat& input, std::map<std::string, cv::Mat>& 
 
 	cv::Mat filtered = applyFilters(grey);
 	resultImages.insert(std::make_pair("filtered", filtered));
-
+	LOG_INFO("Applied filters");
 	//Find the largest shape thing in the image
 	cv::RotatedRect bounding_rect = findLargestContour(filtered, unedited);
-
+	LOG_INFO("found largest contour");
 	//move the result to the output
 	resultImages.insert(std::make_pair("contour", filtered));
 
 	//rotate the barcode to be horizontal
 	//and extract it as a new image
+	LOG_INFO("Rotating");
 	cv::Mat rotated = extractBarcodeMat(bounding_rect, grey);
-
+	LOG_INFO("extracted barcode mat");
 	resultImages.insert(std::make_pair("rotated", rotated));
-	readBarcodeData(rotated, resultImages["rotated"]);
+	try {
+		readBarcodeData(rotated, resultImages["rotated"]);
+		LOG_INFO("read barcode data");
+	}
+	catch (int e) { LOG_ERROR("Exception occurred with numer: " + e); }
 }
 
 cv::Mat BarcodeFinder::applyFilters(cv::Mat& grey) const {
@@ -67,15 +72,16 @@ cv::Mat BarcodeFinder::applyFilters(cv::Mat& grey) const {
 	cv::Mat abs_grad_x, abs_grad_y;
 	convertScaleAbs(grad_x, abs_grad_x);
 	convertScaleAbs(grad_y, abs_grad_y);
-
 	//combine the horizontal and vertical gradients
 	cv::Mat grad;
 	addWeighted(abs_grad_x, 0.5, abs_grad_y, 0.5, 0, grad);
 	convertScaleAbs(grad, grad);
 
+
 	//Blur the input and threshold
 	cv::Mat blurred;
 	blur(grad, blurred, cv::Point(9, 9));
+
 
 	cv::Mat tresh;
 	threshold(blurred, tresh, 70, 255, cv::THRESH_BINARY);
@@ -88,13 +94,12 @@ cv::Mat BarcodeFinder::applyFilters(cv::Mat& grey) const {
 	cv::Mat const kern = getStructuringElement(cv::MORPH_RECT, cv::Point(3, 3));
 	erode(closed, closed, kern, cv::Point(-1, -1), 4, cv::BORDER_ISOLATED);
 	dilate(closed, closed, kern, cv::Point(-1, -1), 4, cv::BORDER_ISOLATED);
-
 	return closed;
 }
 
 cv::RotatedRect BarcodeFinder::findLargestContour(cv::Mat& filtered, cv::Mat& unedited) const {
 	std::vector<std::vector<cv::Point>> contours;
-	findContours(filtered, contours, CV_RETR_EXTERNAL, cv::CHAIN_APPROX_NONE);
+	findContours(filtered, contours, CV_RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
 
 	if (!contours.empty()) {
 		LOG_INFO("Found " + std::to_string(std::size(contours)) + " contours");
@@ -214,9 +219,7 @@ int BarcodeFinder::read_digit(const cv::Mat_<uchar> img, cv::Point& cur, pattern
 				++pattern[i];
 			LOG_TRACE("moving forward");
 			++cur.x;
-			if(cur.x > img.cols) {
-				throw std::out_of_range("point is ouside of image");
-			}
+			if (cur.x > img.cols) { throw std::out_of_range("point is ouside of image"); }
 		}
 
 
@@ -227,7 +230,7 @@ int BarcodeFinder::read_digit(const cv::Mat_<uchar> img, cv::Point& cur, pattern
 		}
 	}
 
-	LOG_TRACE("Found pattern: " + std::to_string(pattern[0])+ std::to_string(pattern[1])+ std::to_string(pattern[2])+
+	LOG_INFO("Found pattern: " + std::to_string(pattern[0])+ std::to_string(pattern[1])+ std::to_string(pattern[2])+
 		std
 		::to_string(pattern[3])+ std::to_string(pattern[4])+ std::to_string(pattern[5])+ std::to_string(pattern[6]));
 
@@ -259,8 +262,12 @@ int BarcodeFinder::read_digit(const cv::Mat_<uchar> img, cv::Point& cur, pattern
 void BarcodeFinder::skip_mguard(const cv::Mat_<uchar>& img, cv::Point& cur) const {
 	int pattern[5] = {SPACE, BAR, SPACE, BAR, SPACE};
 	for (int i = 0; i < 5; ++i)
-		while (img(cur) == pattern[i])
+		while (img(cur) == pattern[i]) {
+			if(cur.x > img.cols) {
+				throw std::out_of_range("Skip m_guard OOB");
+			}
 			++cur.x;
+		}
 }
 
 unsigned BarcodeFinder::read_lguard(const cv::Mat_<uchar>& img, cv::Point& cur) const {
@@ -268,6 +275,9 @@ unsigned BarcodeFinder::read_lguard(const cv::Mat_<uchar>& img, cv::Point& cur) 
 	int pattern[3] = {BAR, SPACE, BAR};
 	for (int i = 0; i < 3; ++i)
 		while (img(cur) == pattern[i]) {
+			if(cur.x > img.cols) {
+				throw std::out_of_range("Skip l_guard OOB");
+			}
 			++cur.x;
 			++widths[i];
 		}
